@@ -1,0 +1,853 @@
+# MIT License
+#
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject
+# to  the following conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN  NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+# BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  This CloudFormation Template deploys the code for Amazon Textract,
+  Amazon Comprehend and Amazon A2I Integration for end-to-end document analysis use-case.
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Enter the name of the S3 Bucket that you have created for this solution.
+  FlowDefinitionARN:
+    Type: String
+    Description: Enter the Human Review Workflow ARN that you have defined.
+  CustomEntityRecognizerARN:
+    Type: String
+    Description: Enter the Custom Entity Model ARN that is currently in use.
+  S3ComprehendBucketName:
+    Type: String
+    Description: Enter the name of a bucket that would temporarily store the Comprehend outputs.
+  CustomEntityTrainingListS3URI:
+    Type: String
+    Description: >
+      Enter the S3 URI for the file that contains entities for the
+      Amazon Comprehend custom entity recognizer training.
+  CustomEntityTrainingDatasetS3URI:
+    Type: String
+    Description: >
+      Enter the S3 URI for the file that contains training dataset for the
+      Amazon Comprehend custom entity recognizer training.
+
+Resources:
+
+  ################################
+  # Textract Comprehend Lambda
+  ################################
+
+  # Create a role for the Comprehend Service to interact with the S3 Bucket
+  ComprehendExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Policies:
+        - PolicyName: "AllowInvoke"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "s3:*"
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - comprehend.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  # Textract Comprehend Lambda Role
+  TextractComprehendLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: "AllowInvoke"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "lambda:InvokeFunction"
+                Resource: "*"
+        - PolicyName: "ReadWriteToS3"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "S3:GetObject"
+                  - "S3:PutObject"
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+              - Effect: "Allow"
+                Action:
+                  - "S3:ListBucket"
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}'
+        - PolicyName: "ComprehendAccessPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "comprehend:StartEntitiesDetectionJob"
+                Resource: "*"
+        - PolicyName: "LoggingCapability"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "arn:aws:logs:*:*:*"
+        - PolicyName: "SSMParameterRead"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "ssm:GetParameters"
+                - "ssm:GetParameter"
+              "Resource": "*"
+        - PolicyName: "IamPassRoleForComprehend"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "iam:PassRole"
+                - "iam:GetRole"
+              "Resource": !GetAtt ComprehendExecutionRole.Arn
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonTextractFullAccess
+
+  TextractComprehendLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: "TextractComprehendLambdaRole"
+    Properties:
+      Handler: 01-TextractComprehend.lambda_handler
+      Description: "Lambda function to start document analysis and send results of Comprehend for A2I Review."
+      Runtime: python3.8
+      Role: !GetAtt TextractComprehendLambdaRole.Arn
+      MemorySize: 512
+      Timeout: 180
+      CodeUri: ./lambda_handlers/
+
+  ################################
+  # Custom Resource Lambda
+  ################################
+  # Grant Invoke Access for the TextractComprehendLambda to the Customer Trigger Lambda
+  LambdaInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !GetAtt TextractComprehendLambda.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !Sub 'arn:aws:s3:::${S3BucketName}'
+
+
+  # IAM Role for the Custom Trigger Lambda
+  LambdaIAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetBucketNotification'
+                  - 's3:PutBucketNotification'
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: 'arn:aws:logs:*:*:*'
+
+  # Custom Lambda to capture S3 Bucket Events and invoke the Textract Comprehend Lambda when
+  # appropriate filters are met
+  CustomResourceLambdaFn:
+    Description: Lambda function to receive S3 Notification and trigger the TextractComprehend Lambda.
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaIAMRole.Arn
+      Code:
+        ZipFile: |
+
+          from __future__ import print_function
+          import json
+          import boto3
+          import cfnresponse
+
+          SUCCESS = "SUCCESS"
+          FAILED = "FAILED"
+
+          print('Loading function')
+          s3 = boto3.resource('s3')
+
+          def lambda_handler(event, context):
+              print("Received event: " + json.dumps(event, indent=2))
+              responseData={}
+              try:
+                  if event['RequestType'] == 'Delete':
+                      print("Request Type:",event['RequestType'])
+                      Bucket=event['ResourceProperties']['Bucket']
+                      delete_notification(Bucket)
+                      print("Sending response to custom resource after Delete")
+                  elif event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                      print("Request Type:",event['RequestType'])
+                      LambdaArn=event['ResourceProperties']['LambdaArn']
+                      Bucket=event['ResourceProperties']['Bucket']
+                      add_notification(LambdaArn, Bucket)
+                      responseData={'Bucket':Bucket}
+                      print("Sending response to custom resource")
+                  responseStatus = 'SUCCESS'
+              except Exception as e:
+                  print('Failed to process:', e)
+                  responseStatus = 'FAILURE'
+                  responseData = {'Failure': 'Something bad happened.'}
+              cfnresponse.send(event, context, responseStatus, responseData)
+
+          def add_notification(LambdaArn, Bucket):
+              bucket_notification = s3.BucketNotification(Bucket)
+              response = bucket_notification.put(
+                NotificationConfiguration={
+                  'LambdaFunctionConfigurations': [
+                    {
+                        'LambdaFunctionArn': LambdaArn,
+                        'Events': [
+                            's3:ObjectCreated:*'
+                        ],
+                        "Filter": {
+                          "Key": {
+                            "FilterRules": [
+                              {
+                                "Name": "prefix",
+                                "Value": "input/"
+                              },
+                              {
+                                  "Name": "suffix",
+                                  "Value": ".jpg"
+                              }
+                            ]
+                          }
+                        }
+                    },
+                    {
+                      'LambdaFunctionArn': LambdaArn,
+                      'Events': [
+                          's3:ObjectCreated:*'
+                      ],
+                      "Filter": {
+                        "Key": {
+                          "FilterRules": [
+                            {
+                              "Name": "prefix",
+                              "Value": "input/"
+                            },
+                            {
+                                "Name": "suffix",
+                                "Value": ".png"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              )
+              print("Put request completed....")
+
+          def delete_notification(Bucket):
+              bucket_notification = s3.BucketNotification(Bucket)
+              response = bucket_notification.put(
+                  NotificationConfiguration={}
+              )
+              print("Delete request completed....")
+      Runtime: python3.6
+      Timeout: 80
+
+  # Custom Trigger to Invoke the Textract Comprehend Lambda
+  LambdaTrigger:
+    Type: 'Custom::LambdaTrigger'
+    DependsOn: LambdaInvokePermission
+    Properties:
+      ServiceToken: !GetAtt CustomResourceLambdaFn.Arn
+      LambdaArn: !GetAtt TextractComprehendLambda.Arn
+      Bucket: !Ref S3BucketName
+
+  ################################
+  # Comprehend A2I
+  ################################
+  # S3 Bucket to have temporary output from Amazon Comprehend Stored
+  ComprehendTemporaryDataStore:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - ComprehendA2ILambdaPermission
+    Properties:
+      BucketName: !Ref S3ComprehendBucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt ComprehendA2ILambda.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: "suffix"
+                    Value: ".gz"
+
+
+  ComprehendA2ILambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref ComprehendA2ILambda
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${S3ComprehendBucketName}'
+      SourceAccount: !Ref AWS::AccountId
+
+  ComprehendA2ILambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: allowLogging
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: arn:aws:logs:*:*:*
+        - PolicyName: getAndDeleteObjects
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:GetObject"
+                  - "s3:putObject"
+                  - "s3:DeleteObject"
+                  - "s3:List*"
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3ComprehendBucketName}/*'
+                  - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+        - PolicyName: "A2IAccess"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "sagemaker:StartHumanLoop"
+                Resource: "*"
+        - PolicyName: "SSMParameterRead"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "ssm:GetParameters"
+                - "ssm:GetParameter"
+              "Resource": "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ComprehendA2ILambda:
+    Type: AWS::Serverless::Function
+    DependsOn: "ComprehendA2ILambdaExecutionRole"
+    Properties:
+      Handler: 02-ComprehendA2I.lambda_handler
+      Description: >
+        This lambda function is triggered once Amazon Comprehend Custom Entity Recognition
+        results are generated. It then collates the results and creates a Human Loop
+        in A2I.
+      Runtime: python3.8
+      Role: !GetAtt ComprehendA2ILambdaExecutionRole.Arn
+      MemorySize: 512
+      Timeout: 180
+      CodeUri: ./lambda_handlers/
+
+
+  ################################
+  # HRW Completion Lambda
+  ################################
+  HumanReviewWorkflowCompletedRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: "AllowInvoke"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "lambda:InvokeFunction"
+                Resource: "*"
+        - PolicyName: "ReadWriteToS3"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "S3:GetObject"
+                  - "S3:PutObject"
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+              - Effect: "Allow"
+                Action:
+                  - "S3:ListBucket"
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}'
+        - PolicyName: "SSMParameterRead"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "ssm:GetParameters"
+                - "ssm:GetParameter"
+              "Resource": "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  HumanReviewWorkflowCompletedLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: "HumanReviewWorkflowCompletedRole"
+    Properties:
+      Handler: 03-HumanReviewCompleted.lambda_handler
+      Description: "Lambda function to handle completion of human workflow."
+      Runtime: python3.8
+      Role: !GetAtt HumanReviewWorkflowCompletedRole.Arn
+      MemorySize: 512
+      Timeout: 180
+      CodeUri: ./lambda_handlers/
+
+  HumanLoopStatusChangeCloudwatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Event Rule to tie up human workflow completion to Lambda function"
+      EventPattern:
+        source:
+          - "aws.sagemaker"
+        detail-type:
+          - "SageMaker A2I HumanLoop Status Change"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt HumanReviewWorkflowCompletedLambda.Arn
+          Id: "TargetFunctionV1"
+
+  HumanReviewWorkflowCompletedPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt HumanReviewWorkflowCompletedLambda.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt HumanLoopStatusChangeCloudwatchEventRule.Arn
+
+  ################################
+  # Time based New-Entity-Check Lambda
+  ################################
+
+  NewEntityCheckLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: "AllowInvoke"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "lambda:InvokeFunction"
+                Resource: "*"
+        - PolicyName: "ReadWriteToS3"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "S3:GetObject"
+                  - "S3:PutObject"
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+              - Effect: "Allow"
+                Action:
+                  - "S3:ListBucket"
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}'
+        - PolicyName: "SSMParameterRead"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "ssm:GetParameters"
+                - "ssm:GetParameter"
+              "Resource": "*"
+        - PolicyName: "DeleteAndPutTrainingComprehendCERParameter"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "ssm:PutParameter"
+                - "ssm:DeleteParameter"
+              "Resource": "*"
+        - PolicyName: "IamPassRoleForComprehend"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "iam:PassRole"
+                - "iam:GetRole"
+              "Resource": !GetAtt ComprehendExecutionRole.Arn
+        - PolicyName: "ComprehendCreateEntityRecognizerPermission"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action: "comprehend:CreateEntityRecognizer"
+              "Resource": "*"
+        - PolicyName: "EnableDisableCWEventForTrainingCER"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "events:EnableRule"
+                - "events:DisableRule"
+              Resource: "*"
+        - PolicyName: "ListCWEventsRules"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action: "events:ListRules"
+              Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  NewEntityCheckLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: "NewEntityCheckLambdaRole"
+    Properties:
+      Handler: 04-NewEntityCheck.lambda_handler
+      Description: "Lambda function to handle completion of human workflow."
+      Runtime: python3.8
+      Role: !GetAtt NewEntityCheckLambdaRole.Arn
+      MemorySize: 512
+      Timeout: 180
+      CodeUri: ./lambda_handlers/
+
+  ScheduledNewEntityCheckCWEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Event Rule to tie up human workflow completion to Lambda function"
+      ScheduleExpression: "rate(1 day)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt NewEntityCheckLambda.Arn
+          Id: "NewEntityCheckFunction"
+
+  NewEntityCheckPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt NewEntityCheckLambda.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduledNewEntityCheckCWEventRule.Arn
+
+  ################################
+  # Training CER Completion Check Lambda
+  ################################
+
+  TrainingCERCompletionCheckLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: "AllowInvoke"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "lambda:InvokeFunction"
+                Resource: "*"
+        - PolicyName: "ReadWriteToS3"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "S3:GetObject"
+                  - "S3:PutObject"
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+              - Effect: "Allow"
+                Action:
+                  - "S3:ListBucket"
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}'
+        - PolicyName: "SSMParameterRead"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "ssm:GetParameters"
+                - "ssm:GetParameter"
+              "Resource": "*"
+        - PolicyName: "DeleteAndPutTrainingComprehendCERParameter"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "ssm:PutParameter"
+                - "ssm:DeleteParameter"
+              "Resource": "*"
+        - PolicyName: "IamPassRoleForComprehend"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "iam:PassRole"
+                - "iam:GetRole"
+              "Resource": !GetAtt ComprehendExecutionRole.Arn
+        - PolicyName: "ComprehendCreateEntityRecognizerPermission"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "comprehend:CreateEntityRecognizer"
+                - "comprehend:ListEntityRecognizers"
+                - "comprehend:DescribeEntityRecognizer"
+                - "comprehend:DeleteEntityRecognizer"
+              "Resource": "*"
+        - PolicyName: "EnableDisableCWEventForTrainingCER"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action:
+                - "events:EnableRule"
+                - "events:DisableRule"
+              Resource: "*"
+        - PolicyName: "ListCWEventsRules"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: "Allow"
+              Action: "events:ListRules"
+              Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  TrainingCERCompletionLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: "TrainingCERCompletionCheckLambdaRole"
+    Properties:
+      Handler: 05-CERTrainingCompleteCheck.lambda_handler
+      Description: "Lambda function to handle completion of training job for Comprehend CER."
+      Runtime: python3.8
+      Role: !GetAtt TrainingCERCompletionCheckLambdaRole.Arn
+      MemorySize: 512
+      Timeout: 180
+      CodeUri: ./lambda_handlers/
+
+  ScheduledTrainingCERCompletionCheckCWEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: >
+        Event Rule to periodically check for completion of Training Job for new CER.
+      ScheduleExpression: "rate(10 minutes)"
+      State: DISABLED
+      Targets:
+        - Arn: !GetAtt TrainingCERCompletionLambda.Arn
+          Id: "ComprehendCERTrainingCompletionCheckFunction"
+
+  TrainingCERCompletionCheckPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt TrainingCERCompletionLambda.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduledTrainingCERCompletionCheckCWEventRule.Arn
+
+  ################################
+  # SSM Parameters
+  ################################
+  S3BucketNameSSM:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Type: 'String'
+      DataType: 'text'
+      Description: >
+        S3BucketName that contains all data required for the
+        Textract Comprehend A2I workflow.
+      Name: "S3BucketName-TCA2I"
+      Value: !Ref S3BucketName
+
+  FlowDefARNSSM:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Type: 'String'
+      DataType: 'text'
+      Description: >
+        Human Review Workflow ARN that will be used to review Comprehend's Custom Entities.
+      Name: "FlowDefARN-TCA2I"
+      Value: !Ref FlowDefinitionARN
+
+  CustomEntityRecognizerARNSSM:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Type: 'String'
+      DataType: 'text'
+      Description: >
+        The ARN of the current Custom Entity Recognizer.
+      Name: "CustomEntityRecognizerARN-TCA2I"
+      Value: !Ref CustomEntityRecognizerARN
+
+  TrainingCustomEntityRecognizerARNSSM:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Type: 'String'
+      DataType: 'text'
+      Description: >
+        The ARN of the under-training Custom Entity Recognizer.
+      Name: "TrainingCustomEntityRecognizerARN-TCA2I"
+      Value: !Ref CustomEntityRecognizerARN
+
+  CERTrainingCompletionCheckRuleARNSSM:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Type: 'String'
+      DataType: 'text'
+      Description: >
+        The S3 URI for the file that contains entities for the
+        Amazon Comprehend custom entity recognizer training.
+      Name: "CERTrainingCompletionCheckRuleARN-TCA2I"
+      Value: !GetAtt ScheduledTrainingCERCompletionCheckCWEventRule.Arn
+
+  CustomEntityRecognizerAccessRoleARNSSM:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Type: 'String'
+      DataType: 'text'
+      Description: >
+        The ARN of the current Comprehend Execution Role to allow access to S3 Buckets.
+      Name: "ComprehendExecutionRole-TCA2I"
+      Value: !GetAtt ComprehendExecutionRole.Arn
+
+  ComprehendTemporaryDataStoreBucketNameSSM:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Type: 'String'
+      DataType: 'text'
+      Description: >
+        The Bucket Name for the temporary data storage bucket for Amazon Comprehend Outputs.
+      Name: "ComprehendTemporaryDataStoreBucketName-TCA2I"
+      Value: !Ref S3ComprehendBucketName
+
+  CustomEntityTrainingDatasetS3URISSM:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Type: 'String'
+      DataType: 'text'
+      Description: >
+        The S3 URI for the file that contains entities for the
+        Amazon Comprehend custom entity recognizer training.
+      Name: "CustomEntityTrainingDatasetS3URI-TCA2I"
+      Value: !Ref CustomEntityTrainingDatasetS3URI
+
+  CustomEntityTrainingListS3URISSM:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Type: 'String'
+      DataType: 'text'
+      Description: >
+        The S3 URI for the file that contains entities for the
+        Amazon Comprehend custom entity recognizer training.
+      Name: "CustomEntityTrainingListS3URI-TCA2I"
+      Value: !Ref CustomEntityTrainingListS3URI
+
