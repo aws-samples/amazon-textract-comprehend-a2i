@@ -255,7 +255,7 @@ Resources:
                   responseStatus = 'SUCCESS'
               except Exception as e:
                   print('Failed to process:', e)
-                  responseStatus = 'FAILURE'
+                  responseStatus = 'FAILED'
                   responseData = {'Failure': 'Something bad happened.'}
               cfnresponse.send(event, context, responseStatus, responseData)
 
