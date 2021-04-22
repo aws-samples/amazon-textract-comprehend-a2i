@@ -1,0 +1,61 @@
+<!--
+# MIT License
+#
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject
+# to  the following conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN  NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+# BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+-->
+
+<script src="https://assets.crowd.aws/crowd-html-elements.js"></script>
+
+<crowd-entity-annotation
+        name="crowd-entity-annotation"
+        header="Highlight parts of the text below"
+        labels="{{ task.input.labels | to_json | escape }}"
+        initial-value="{{ task.input.initialValue }}"
+        text="{{ task.input.originalText }}"
+>
+    <full-instructions header="Named entity recognition instructions">
+        <ol>
+            <li><strong>Read</strong> the text carefully.</li>
+            <li><strong>Highlight</strong> words, phrases, or sections of the text.</li>
+            <li><strong>Choose</strong> the label that best matches what you have highlighted.</li>
+            <li>To <strong>change</strong> a label, choose highlighted text and select a new label.</li>
+            <li>To <strong>remove</strong> a label from highlighted text, choose the X next to the abbreviated label name on the highlighted text.</li>
+            <li>You can select all of a previously highlighted text, but not a portion of it.</li>
+        </ol>
+    </full-instructions>
+
+    <short-instructions>
+        Highlight the custom entities that went missing.
+    </short-instructions>
+
+</crowd-entity-annotation>
+
+<script>
+    document.addEventListener('all-crowd-elements-ready', () => {
+        document
+            .querySelector('crowd-entity-annotation')
+            .shadowRoot
+            .querySelector('crowd-form')
+            .form;
+    });
+</script>

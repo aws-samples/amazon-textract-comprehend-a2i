@@ -1,0 +1,50 @@
+Text,Type
+Country:US,GENUINE
+Country:UK,GENUINE
+Country:CAN,GENUINE
+Country:FRA,GENUINE
+Years:15,GENUINE
+Years:18,GENUINE
+Years:16,GENUINE
+Years:17,GENUINE
+Cell Phone:(281)123 4567,GENUINE
+Cell Phone:(345)789 0123,GENUINE
+Cell Phone:(999)999 9999,GENUINE
+Cell Phone:(666)999 7777,GENUINE
+Name:Kwaku Mensah,GENUINE
+Name:John Smith,GENUINE
+TOTAL $:9000.00/month,GENUINE
+TOTAL $:7000.00/month,GENUINE
+TOTAL $:6000.00/month,GENUINE
+Social Security Number:111 - 11 - 1111,GENUINE
+Social Security Number:222 - 22 - 2222,GENUINE
+Social Security Number:234 - 56 - 7890,GENUINE
+Date of Birth:01 / 01 / 1963,GENUINE
+Date of Birth:01 / 01 / 1966,GENUINE
+Date of Birth:02/ 01 / 1976,GENUINE
+Country:ABC,FAKE
+Country:DEFG,FAKE
+Country:KAFP,FAKE
+Country:BLAH,FAKE
+Years:0,FAKE
+Years:999,FAKE
+Cell Phone:147,FAKE
+Cell Phone:1234,FAKE
+Cell Phone:7777,FAKE
+Cell Phone:000,FAKE
+Name:F R,FAKE
+Name:R A,FAKE
+Name:C E,FAKE
+Name:Z Z,FAKE
+TOTAL $:90.00/month,FAKE
+TOTAL $:800.00/month,FAKE
+TOTAL $:120.00/month,FAKE
+TOTAL $:88/m,FAKE
+Social Security Number:-54-,FAKE
+Social Security Number:777,FAKE
+Social Security Number:2222,FAKE
+Social Security Number:090,FAKE
+Date of Birth:1853,FAKE
+Date of Birth:196,FAKE
+Date of Birth:1780,FAKE
+Date of Birth:10000,FAKE
