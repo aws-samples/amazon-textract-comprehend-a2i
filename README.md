@@ -102,7 +102,7 @@ Now that you have packaged your code you can run the following command to deploy
 
 ## Test the Deployment
 
-Go to the S3 Bucket, **S3BucketNamePlaceholder**, and create a new folder titled **input**. Whenever you will upload a .jpeg, or a .png file in this folder, the workflow will begin.
+Go to the S3 Bucket, **S3BucketNamePlaceholder**, and create a new folder titled **input**. Whenever you will upload a .jpg, or a .png file in this folder, the workflow will begin.
 
 Log in to your A2I Review Console and make an desired changes.
 
