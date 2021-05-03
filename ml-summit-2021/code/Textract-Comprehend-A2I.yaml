@@ -163,7 +163,7 @@ Resources:
      Properties:
        LayerName: aws-datawrangler-pandas
        Description: Dependencies for using pandas DataFrames in code
-       ContentUri: s3://prem-profiler-test/code/lambda_handlers/awswrangler-layer-2.7.0-py3.8.zip
+       ContentUri: s3://bucketname/code/lambda_handlers/awswrangler-layer-2.7.0-py3.8.zip
        CompatibleRuntimes:
          - python3.8
 
@@ -182,7 +182,7 @@ Resources:
         - Arn
       MemorySize: 512
       Timeout: 180
-      CodeUri: s3://prem-profiler-test/code/lambda_handlers/TextractComprehend.py.zip
+      CodeUri: s3://bucketname/code/lambda_handlers/TextractComprehend.py.zip
 
 
   ################################
@@ -347,7 +347,7 @@ Resources:
         - Arn
       MemorySize: 512
       Timeout: 180
-      CodeUri: s3://prem-profiler-test/code/lambda_handlers/ComprehendA2I.py.zip
+      CodeUri: s3://bucketname/code/lambda_handlers/ComprehendA2I.py.zip
 
   NotificationS3BucketCA:
     Type: AWS::S3::Bucket
@@ -436,7 +436,7 @@ Resources:
         - Arn
       MemorySize: 512
       Timeout: 180
-      CodeUri: s3://prem-profiler-test/code/lambda_handlers/HumanReviewCompleted.py.zip
+      CodeUri: s3://bucketname/code/lambda_handlers/HumanReviewCompleted.py.zip
 
   HumanLoopStatusChangeCloudwatchEventRule:
     Type: AWS::Events::Rule
@@ -575,7 +575,7 @@ Resources:
         - Arn
       MemorySize: 512
       Timeout: 180
-      CodeUri: s3://prem-profiler-test/code/lambda_handlers/NewEntityCheck.py.zip
+      CodeUri: s3://bucketname/code/lambda_handlers/NewEntityCheck.py.zip
 
   ScheduledNewEntityCheckCWEventRule:
     Type: AWS::Events::Rule
@@ -714,7 +714,7 @@ Resources:
         - Arn
       MemorySize: 512
       Timeout: 180
-      CodeUri: s3://prem-profiler-test/code/lambda_handlers/CERTrainingCompleteCheck.py.zip
+      CodeUri: s3://bucketname/code/lambda_handlers/CERTrainingCompleteCheck.py.zip
 
   ScheduledTrainingCERCompletionCheckCWEventRule:
     Type: AWS::Events::Rule
